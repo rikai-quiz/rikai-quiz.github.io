@@ -66,6 +66,7 @@
   }
   .choice:hover { outline: 2px solid var(--accent); }
   .choice b { color: var(--accent); margin-right: 8px; }
+  .choice.on, .choice.on b { background: var(--accent); color: #fff; }
   .progress { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 8px; }
   .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
   .qnum { color: var(--sub); font-size: .85rem; margin-top: 12px; }
@@ -321,14 +322,43 @@ async function rankingView(id) {
       <div class="card">${rankTable(r.ranking)}</div>
       ${r.owner ? breakdown(r.name, r.questions, r.answers, r.people)
         : `<div class="sub" style="margin-top:12px">挑戦すると、みんながどれを選んだかも見られます。</div>`}
-      ${r.owner ? `<div class="row"><button class="secondary" id="copy">挑戦用URLをコピー</button></div><div class="sub" id="copied"></div>`
+      ${r.owner ? `<div class="row"><button class="secondary" id="copy">挑戦用URLをコピー</button>
+          <button class="secondary" id="edit">自分の答えを直す</button></div><div class="sub" id="copied"></div>`
         : `<div class="row"><button class="secondary" onclick="location.href='?q=${encodeURIComponent(id)}'">このクイズに挑戦する</button></div>`}`;
     const copy = document.getElementById("copy");
     if (copy) copy.onclick = async () => {
       try { await navigator.clipboard.writeText(`${BASE}?q=${id}`); document.getElementById("copied").textContent = "コピーしました"; }
       catch { document.getElementById("copied").textContent = `${BASE}?q=${id}`; }
     };
+    const edit = document.getElementById("edit");
+    if (edit) edit.onclick = () => editAnswers(id, mine.key, r);
   } catch (e) { fail(e); }
+}
+
+// 作成者が自分の答えを直す画面。保存すると全員のスコアが計算し直される
+function editAnswers(id, key, r) {
+  const answers = r.answers.slice();
+  app.innerHTML = `${header}
+    <h1>自分の答えを直す</h1>
+    <div class="sub">変えたい問題の選択肢を押して、最後に保存してください。挑戦済みの人のスコアも新しい答えで計算し直されます。</div>
+    ${r.questions.map((item, i) => `<div class="card">
+      <div class="qnum">Q${i + 1}</div>
+      <div class="qtext">${esc(item.q)}</div>
+      ${item.a.map((t, k) => `<button class="choice" data-i="${i}" data-k="${k}"><b>${LABELS[k]}</b>${esc(t)}</button>`).join("")}
+    </div>`).join("")}
+    <div class="row"><button class="ghost" id="cancel">やめる</button><button class="primary" id="save">保存する</button></div>
+    <div class="error" id="err"></div>`;
+  const paint = () => app.querySelectorAll(".choice").forEach(b =>
+    b.classList.toggle("on", answers[b.dataset.i] === Number(b.dataset.k)));
+  app.querySelectorAll(".choice").forEach(b => b.onclick = () => { answers[b.dataset.i] = Number(b.dataset.k); paint(); });
+  paint();
+  document.getElementById("cancel").onclick = () => rankingView(id);
+  const save = document.getElementById("save");
+  save.onclick = async () => {
+    save.disabled = true;
+    try { await post("updateAnswers", { id, key, answers }); rankingView(id); }
+    catch (e) { document.getElementById("err").textContent = e.message; save.disabled = false; }
+  };
 }
 
 // ---- 質問の募集 ----

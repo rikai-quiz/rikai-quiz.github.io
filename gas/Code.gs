@@ -37,6 +37,7 @@ function respond(p) {
       case "submit": out = submit(p); break;
       case "ranking": out = rankingFor(p); break;
       case "suggest": out = suggest(p); break;
+      case "updateAnswers": out = updateAnswers(p); break;
       default: throw new Error("unknown action");
     }
   } catch (err) {
@@ -96,6 +97,36 @@ function submit(p) {
   const score = picks.filter((v, i) => v === quiz.answers[i]).length;
   sheet(SHEET.results).appendRow([quiz.id, name, score, quiz.answers.length, new Date(), "'" + picks.join("")]);
   return { score, total: quiz.answers.length, answers: quiz.answers, ranking: ranking(quiz.id), people: people(quiz.id) };
+}
+
+// 作成者が自分の答えを直す。すでに挑戦した人のスコアも新しい答えで計算し直す
+function updateAnswers(p) {
+  const quiz = findQuiz(p.id);
+  if (!p.key || String(p.key) !== quiz.key) throw new Error("作成者だけが答えを直せます");
+  const answers = Array.isArray(p.answers) ? p.answers : [];
+  if (answers.length !== quiz.answers.length || answers.some(a => ![0, 1, 2].includes(a))) throw new Error("回答が不正です");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const qs = sheet(SHEET.quizzes);
+    const qv = qs.getDataRange().getValues();
+    const qrow = qv.findIndex((r, i) => i > 0 && String(r[0]) === quiz.id);
+    qs.getRange(qrow + 1, HEADERS.quizzes.indexOf("answers") + 1).setValue("'" + answers.join(""));
+
+    const rs = sheet(SHEET.results);
+    const rv = rs.getDataRange().getValues();
+    const col = name => rv[0].indexOf(name);
+    rv.forEach((r, i) => {
+      if (i === 0 || String(r[col("quiz_id")]) !== quiz.id) return;
+      const picks = String(r[col("picks")]).split("").map(Number);
+      const score = picks.filter((v, k) => v === answers[k]).length;
+      rs.getRange(i + 1, col("score") + 1).setValue(score);
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  return rankingFor(p);
 }
 
 // 挑戦前の人にはスコアだけ。作成者(key一致)には答えと全員の回答も返す
